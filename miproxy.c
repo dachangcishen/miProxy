@@ -12,23 +12,20 @@
 #include "parse.c"
 #define MAXCLIENTS 30
 
-int main(int argc, const char **argv){
+
+int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     int listen_socket, addrlen, activity, valread;
-    int client_sockets[MAXCLIENTS] = {0};
-    double throughputs[MAXCLIENTS] = {0};
-    unsigned short port = (unsigned short) atoi(argv[2]);
-    char* wwwip = argv[3];
-    double alpha = strtod(argv[4]);
-    char* log = argv[5];
+    int client_sockets[MAXCLIENTS] = { 0 };
+    double throughputs[MAXCLIENTS] = { 0 };
     int client_sock;
 
     struct sockaddr_in address;
-    address->sin_family = AF_INET;
-    address->sin_addr.s_addr = INADDR_ANY;
-    address->sin_port = htons(port);
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
     listen_socket = open_listen_socket(port);
 
-    char buffer[1025]; 
+    char buffer[1025];
 
     addrlen = sizeof(address);
     puts("Waiting for connections ...");
@@ -54,7 +51,7 @@ int main(int argc, const char **argv){
         // If something happened on the master socket ,
         // then its an incoming connection, call accept()
         if (FD_ISSET(listen_socket, &readfds)) {
-            int new_socket = accept(listen_socket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+            int new_socket = accept(listen_socket, (struct sockaddr*)&address, (socklen_t*)&addrlen);
 
             // inform user of socket number - used in send and receive commands
             printf("\n---New host connection---\n");
@@ -76,7 +73,7 @@ int main(int argc, const char **argv){
             // Note: sd == 0 is our default here by fd 0 is actually stdin
             if (client_sock != 0 && FD_ISSET(client_sock, &readfds)) {
                 // Check if it was for closing , and also read the incoming message
-                getpeername(client_sock, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+                getpeername(client_sock, (struct sockaddr*)&address, (socklen_t*)&addrlen);
                 valread = read(client_sock, buffer, 1024);
                 if (valread == 0) {
                     // Somebody disconnected , get their details and print
@@ -85,7 +82,8 @@ int main(int argc, const char **argv){
                     // Close the socket and mark as 0 in list for reuse
                     close(client_sock);
                     client_sockets[i] = 0;
-                } else {
+                }
+                else {
                     // send the same message back to the client, hence why it's called
                     // "echo_server"
                     buffer[valread] = '\0';
@@ -98,5 +96,27 @@ int main(int argc, const char **argv){
         }
         //not finished yet
     }
-    return 0;    
+    return 0;
+}
+
+
+int main(int argc, const char **argv){
+    if (argc == 6 && strcmp(argv[1],"-nodns")==0) {
+        unsigned short port = (unsigned short)atoi(argv[2]);
+        char* wwwip = argv[3];
+        char* errptr;
+        double alpha = strtod(argv[4], errptr);
+        char* log = argv[5];
+
+        run_miProxy(port, wwwip, alpha, log);
+
+        return 0;
+
+       }
+    else {
+
+        printf("Error! Please Run with proper arguments");
+
+        return -1;
+    }
 }
