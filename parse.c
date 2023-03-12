@@ -38,8 +38,8 @@ int get_header_val(char *head, size_t headlen, char *key, size_t keylen, char *v
 
     remaining_length = remaining_length - (string - head);
     if (memmem(string, remaining_length, "\n", 1) == NULL) return 0;
-    
-    for (long int t = 0; string[t] != '\n'; t++){
+    long int t = 0;
+    for (t = 0; string[t] != '\n'; t++){
         val[t] = string[t];
     }
     val[t - 1] = '\0'; 
