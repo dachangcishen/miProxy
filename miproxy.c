@@ -10,8 +10,48 @@
 #include <unistd.h> //close
 #include "socket.c"
 #include "parse.c"
-#define MAXCLIENTS 30
 
+#define MAXCLIENTS 30
+#define HEADERLEN 10000
+#define CONTENT 100000
+
+int open_listen_socket(unsigned short port) {
+    int listen_fd;
+    int opt_value = 1;
+    struct sockaddr_in server_address;
+
+
+    listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&opt_value, sizeof(int));
+
+    memset((char*)&server_address, 0, sizeof(server_address));
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(port);
+    bind(listen_fd, (struct sockaddr*)&server_address, sizeof(server_address));
+
+    listen(listen_fd, MAXCLIENTS);
+
+    return listen_fd;
+}
+
+//choose a proper bitrate
+int bitrate(double T_cur) {
+
+}
+
+int readLine(char* from, int offset, int length, char* to ) {
+    int i;
+    for (i = 0; i < length; i++) {
+        to[i] = from[i];
+        if (from[i] == '\0' || from[i] == '\n') {
+            break;
+        }
+    }
+    return i;
+}
 
 int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     int listen_socket, addrlen, activity, valread;
@@ -19,6 +59,10 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     double throughputs[MAXCLIENTS] = { 0 };
     int client_sock;
 
+    //Open log file;
+    FILE* logFile;
+    logFile = fopen(log, "w");
+    
     struct sockaddr_in address;
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
@@ -31,6 +75,11 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     puts("Waiting for connections ...");
     // set of socket descriptors
     fd_set readfds;
+
+    double T_cur = 0.0001;
+    double T_new = 0.0001;
+
+    //listen
     while (1) {
         // clear the socket set
         FD_ZERO(&readfds);
@@ -56,7 +105,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
             // inform user of socket number - used in send and receive commands
             printf("\n---New host connection---\n");
             printf("socket fd is %d , ip is : %s , port : %d \n", new_socket, inet_ntoa(address.sin_addr), ntohs(address.sin_port));
-
 
             // add new socket to the array of sockets
             for (int i = 0; i < MAXCLIENTS; i++) {
@@ -84,18 +132,101 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     client_sockets[i] = 0;
                 }
                 else {
-                    // send the same message back to the client, hence why it's called
-                    // "echo_server"
-                    buffer[valread] = '\0';
-                    printf("\n---New message---\n");
-                    printf("Message %s", buffer);
-                    printf("Received from: ip %s , port %d \n", inet_ntoa(address.sin_addr), ntohs(address.sin_port));
+                    int nbytes = 0;
+                    char buffer[CONTENT];
+                    
+                    //Revised request(both nolist f4m and video chunk)
+                    char request[HEADERLEN];  memset(request, 0, HEADERLEN * sizeof(char));
+                    //Request Line buffer
+                    char line[HEADERLEN];  memset(line, 0, HEADERLEN * sizeof(char));
+                    int offset = 0;
+                    // Method / URI / Version
+                    char method[HEADERLEN];   memset(method, 0, HEADERLEN * sizeof(char));
+                    char url[HEADERLEN];   memset(url, 0, HEADERLEN * sizeof(char));
+                    char version[HEADERLEN];   memset(version, 0, HEADERLEN * sizeof(char));
+
+                    //store rest of header;
+                    char rest[HEADERLEN];   memset(rest, 0, HEADERLEN * sizeof(char));
+
+                    //receive request
+                    nbytes = (int)recv(i, buffer, CONTENT, MSG_NOSIGNAL);
+
+                    //delete all IF if there is something wrong here.
+                    if (nbytes < 1) { 
+                        perror("Error in receving");
+                        close(i);
+                        for (int j = 0; j < MAXCLIENTS; ++j)
+                        {
+                            if (client_sockets[j] == i)
+                            {
+                                client_sockets[j] = 0;
+                                break;
+                            }
+                        }
+                        continue; 
+                    }
+
+                    //parse first line
+
+                    nbytes = readLine(buffer, offset, line, sizeof(buffer));
+                    offset = offset + nbytes + 1;
+                    sscanf(line, "%s %s %s\r\n", method, url, version);
+
+                    //store rest of them
+                    while (nbytes)
+                    {
+                        memset(line, 0, HEADERLEN * sizeof(char));
+                        nbytes = readLine(buffer, offset , line, sizeof(buffer));
+                        strcat(rest, line);
+
+                        offset += nbytes + 1;
+                    }
+                    nbytes = readLine(buffer, offset, line, sizeof(buffer));
+                    strcat(rest, line);
+                    
+                    printf("Finish parse header: \nmethod: %s, url: %s, version: %s\n %s", method, url, version,rest);
+                    
+                    //IF it is a f4m request
+                    if (strstr(url, ".f4m")){
+                        char* newTail = "_nolist.f4m";
+                        char* newUrl = strcat(strtok(url, ".f4m"), newTail);
+                        sprintf(request, "%s %s %s", method, newUrl, version);
+                        strcat(request, rest);
+
+                        //send revised request(both)
+                        nbytes = (int)send(listen_socket, request, sizeof(request), 0);
+                        nbytes = (int)send(listen_socket, buffer, sizeof(buffer), 0);
+                    }
+                    //IF it is a video request
+                    else if (strstr(url, "Seg") && strstr(url, "Frag")) {
+
+                        //get a bitrate, not done yet
+                        int bitrate = bitrate(T_cur);
+
+                        //pathBitrateChunk of url
+                        char path[1000];   memset(path, 0, 1000 * sizeof(char));
+                        char chunk[1000];   memset(chunk, 0, 1000 * sizeof(char));
+                        sscanf(url, "%[^0-9]%*d%s", path, chunk);
+                        sprintf(request, "%s %s%d%s %s", method, path, bitrate, chunk, version);
+                        strcat(request, rest);
+                        //send revised request
+                        nbytes = (int)send(listen_socket, request, sizeof(request), 0);
+                    }
+                    else {
+                        strcpy(request, buffer);
+                        //send revised request
+                        nbytes = (int)send(listen_socket, request, sizeof(request), 0);
+                    }
+                    memset(buffer, 0, CONTENT * sizeof(char));
+
+                    
 
                 }
             }
         }
         //not finished yet
     }
+    fclose(logFile);
     return 0;
 }
 
@@ -115,7 +246,7 @@ int main(int argc, const char **argv){
        }
     else {
 
-        printf("Error! Please Run with proper arguments");
+        printf("Error! Please Run with proper argument");
 
         return -1;
     }
