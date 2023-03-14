@@ -149,12 +149,12 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     char rest[HEADERLEN];   memset(rest, 0, HEADERLEN * sizeof(char));
 
                     //receive request
-                    nbytes = (int)recv(i, buffer, CONTENT, MSG_NOSIGNAL);
+                    nbytes = (int)recv(client_sock, buffer, CONTENT, MSG_NOSIGNAL);
 
                     //delete all IF if there is something wrong here.
                     if (nbytes < 1) { 
                         perror("Error in receving");
-                        close(i);
+                        close(client_sock);
                         for (int j = 0; j < MAXCLIENTS; ++j)
                         {
                             if (client_sockets[j] == i)
@@ -237,7 +237,20 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     char val[1000];   memset(val, 0, 1000*sizeof(char));
                     get_header_val(buffer, sizeof(buffer), "Content_Length", 14, val);
                     content_Length = atoi(val);
+                    int left = content_Length;
+                    int total = content_Length + readed;
 
+                    char* buffer_ptr = buffer + readed;
+                    while (1) {
+                        nbytes = (int)recv(client_sock, buffer_ptr, left, MSG_NOSIGNAL);
+                        if (nbytes < 0) {
+                            perror("Error receiving response");
+                            close(client_sock);
+                            break;
+                        }
+                        left = left - nbytes;
+                        buffer_ptr = buffer_ptr + nbytes;
+                    }
 
                 }
             }
