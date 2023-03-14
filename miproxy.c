@@ -219,7 +219,25 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     memset(buffer, 0, CONTENT * sizeof(char));
 
-                    
+                    //Receive Response
+
+                    time_t startTime;
+                    time_t endTime;
+
+                    time(&startTime);
+                    nbytes = (int)recv(listen_socket, buffer,HEADERLEN * sizeof(char), 0);
+                    if (nbytes == -1)
+                    {
+                        perror("Error receiving response");
+                        close(listen_socket);
+                        break;
+                    }
+                    int readed = nbytes;
+                    int content_Length = 0;
+                    char val[1000];   memset(val, 0, 1000*sizeof(char));
+                    get_header_val(buffer, sizeof(buffer), "Content_Length", 14, val);
+                    content_Length = atoi(val);
+
 
                 }
             }
