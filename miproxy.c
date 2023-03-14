@@ -155,14 +155,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     if (nbytes < 1) { 
                         perror("Error in receving");
                         close(client_sock);
-                        for (int j = 0; j < MAXCLIENTS; ++j)
-                        {
-                            if (client_sockets[j] == i)
-                            {
-                                client_sockets[j] = 0;
-                                break;
-                            }
-                        }
+                        client_sockets[i] = 0;
                         continue; 
                     }
 
@@ -246,6 +239,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         if (nbytes < 0) {
                             perror("Error receiving response");
                             close(client_sock);
+                            client_sockets[i] = 0;
                             break;
                         }
                         left = left - nbytes;
