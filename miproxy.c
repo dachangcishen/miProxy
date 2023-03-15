@@ -101,6 +101,39 @@ int readLine(char* from, int offset, int length, char* to) {
     return n;
 }
 
+int get_header_len(char* res) {
+    char resp[10000];
+    strcpy(resp, res);
+    int indx;
+    for (int i = 3; i < strlen(resp); i++) {
+        if (resp[i] == '\n' && resp[i - 1] == '\r' && resp[i - 2] == '\n' && resp[i - 3] == '\r') {
+            indx = i;
+        }
+    }
+    return indx;
+}
+
+int get_content_len(char* res) {
+    int len = -1;
+    char resp[10000];
+    strcpy(resp, res);
+    char* tok = strtok(resp, "\r\n");
+    char tmp[50] = { 0 };
+    while (tok)
+    {
+        if (strstr(tok, "Content-Length")) {
+            for (int i = 0; i < strlen(tok)-16; i++) {
+                tmp[i] = tok[i+16];
+            }
+            len = atoi(tmp);
+            break;
+        }
+        tok = strtok(NULL, "\r\n");
+    }
+    return len;
+
+}
+
 int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     int listen_socket, addrlen, activity, valread;
     int client_sockets[MAXCLIENTS] = { 0 };
@@ -215,6 +248,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     // Parse http request
                     puts("Parse request");
                     int nbytes = valread;
+                    printf("nbytes: %d\n", nbytes);
                     
                     //Revised request(both nolist f4m and video chunk)
                     char request[HEADERLEN];  memset(request, 0, HEADERLEN * sizeof(char));
@@ -231,17 +265,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 
                     char path[1000];   memset(path, 0, 1000 * sizeof(char));
                     char chunk[1000];   memset(chunk, 0, 1000 * sizeof(char));
-
-                    //receive request
-                    puts("Receive first request");
-                    //delete all IF if there is something wrong here.
-                    if (nbytes < 0) { 
-                        perror("Error in receving");
-                        close(client_sock);
-                        client_sockets[i] = 0;
-                        close(proxy_client_sock);
-                        continue; 
-                    }
 
                     //parse first line
 
@@ -265,6 +288,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     
                     //IF it is a f4m request
                     if (strstr(url, ".f4m")){
+                        printf("f4m\n");
                         char* newTail = "_nolist.f4m";
                         char* newUrl = strcat(strtok(url, ".f4m"), newTail);
                         sprintf(request, "%s %s %s", method, newUrl, version);
@@ -336,8 +360,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     else {
                         //send revised request
-                        nbytes = (int)send(proxy_client_sock, buf, strlen(buffer), 0);
-                        printf("%d\n", nbytes);
+                        nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
                     }
 
                     //Recv
@@ -345,9 +368,8 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     time_t start;
                     time_t end;
                     time(&start);
-
-                    nbytes = (int)recv(proxy_client_sock, buf, HEADERLEN * sizeof(char), 0);
-                    
+                    int tt = proxy_client_sock;
+                    nbytes = (int)recv(tt, buf,sizeof(buf), MSG_NOSIGNAL);
                     if (nbytes == -1)
                     {
                         perror("Error receiving response");
@@ -356,21 +378,18 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     int read = nbytes;
                     int remain;
-                    int content_length = 0;
+                    int content_length = -1;
 
                     // Parse content length
-                    offset = 0;
-                    // printf("Parse content length\n");
-                    while (strcmp(line, "\r\n"))
-                    {
-                        memset(line, 0, HEADERLEN * sizeof(char));
-                        nbytes = readLine(buf, offset, sizeof(line), line);
-                        char* cl = strstr(line, "Content-Length: ");
-                        if (cl)
-                            sscanf(cl, "Content-Length: %d", &content_length);
-                        offset += nbytes + 1;
-                    }
+                    int header_length = get_header_len(buf);
+                    offset = header_length +1 ;
+                    printf("%d\n", header_length);
+                    content_length = get_content_len(buf);
                     remain = content_length - (read - offset);
+                    printf("cont: %d\n", content_length);
+                    printf("read: %d\n", read);
+                    printf("remain: %d\n", remain);
+                    printf("offset: %d\n", offset);
                     char* buf_ptr = buf + read;
                     int total = remain + read;
                     while (remain > 0) {
@@ -441,6 +460,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             continue;
                         }
                     }
+                    printf("Sent\n");
                 }
             }
         }
