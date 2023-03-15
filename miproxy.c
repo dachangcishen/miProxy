@@ -233,9 +233,11 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
             client_sock = client_sockets[i];
             // Note: sd == 0 is our default here by fd 0 is actually stdin
             if (client_sock != 0 && FD_ISSET(client_sock, &readfds)) {
+               
                 // Check if it was for closing , and also read the incoming message
                 getpeername(client_sock, (struct sockaddr*)&address, (socklen_t*)&addrlen);
-                valread = read(client_sock, buf, CONTENT);
+                valread = (int)recv(client_sock, buf, CONTENT, MSG_NOSIGNAL);
+                printf("buffer: %s\n", buf);
                 if (valread == 0) {
                     // Somebody disconnected , get their details and print
                     printf("\n---Host disconnected---\n");
@@ -249,6 +251,12 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     puts("Parse request");
                     int nbytes = valread;
                     printf("nbytes: %d\n", nbytes);
+
+                    if (nbytes == -1) {
+                        perror("Error receiving");
+                        close(client_sock);
+                        continue;
+                    }
                     
                     //Revised request(both nolist f4m and video chunk)
                     char request[HEADERLEN];  memset(request, 0, HEADERLEN * sizeof(char));
@@ -432,7 +440,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         time(&end);
                         double period = (double)end - start;
 
-                        T_new = ((total * 8) / 1000) / period;
+                        T_new = (total * 8) / period;
                         T_cur = (1 - alpha) * T_cur + alpha * T_new;
 
                         FILE* logFile;
@@ -453,6 +461,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     //Else, do nothing
                     else {
                         nbytes = (int)send(client_sock, buf, sizeof(buf), 0);
+                        printf("Send to client: %d", nbytes);
                         if (nbytes == -1)
                         {
                             perror("Error sending response");
@@ -461,6 +470,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         }
                     }
                     printf("Sent\n");
+                    memset(buf, 0, sizeof(buf));
                 }
             }
         }
