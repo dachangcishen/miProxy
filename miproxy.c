@@ -2,14 +2,16 @@
 #include <stdio.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <stdlib.h>
 #include <string.h> //strlen
 #include <sys/socket.h>
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO, FD_SETSIZE macros
+#include <time.h>
 #include <sys/types.h>
 #include <unistd.h> //close
-#include "socket.c"
-#include "parse.c"
+//#include "socket.c"
+//#include "parse.c"
 
 #define MAXCLIENTS 30
 #define HEADERLEN 10000
@@ -36,20 +38,19 @@ int open_listen_socket(unsigned short port) {
     return listen_fd;
 }
 
-int client(const char* hostname, int port)
+int client(const char* ip, int port)
 {
     int sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     struct sockaddr_in addr;
+    struct hostent* server = gethostbyname(ip);
+    memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    struct hostent* host = gethostbyname(hostname);
-    memcpy(&(addr.sin_addr), host->h_addr, host->h_length);
-    addr.sin_port = htons((unsigned short int)port);
-
-    if (connect(sockfd, (sockaddr*)&addr, sizeof(addr)) == -1)
-    {
-        perror("Error connecting");
-        exit(0);
+    addr.sin_addr.s_addr = *(unsigned long*)server->h_addr_list[0];
+    addr.sin_port = htons(port);
+    if (connect(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("connection failed");
+        exit(1);
     }
 
     // (4) Return
@@ -107,32 +108,58 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     int tp_length = 0;
     int bitrate;
     int proxy_server_socket,client_sock, proxy_client_sock;
-    //Open log file;
-    
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port);
-    proxy_server_socket = open_listen_socket(port);
-
-    char buffer[1025];
-
-    addrlen = sizeof(address);
-    puts("Waiting for connections ...");
-    // set of socket descriptors
+    struct sockaddr_in server_addr, client_addr;
     fd_set readfds;
 
     double T_cur = 0.0001;
     double T_new = 0.0001;
 
+    char buffer[1025];
+
+    char buf[CONTENT];
+
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
+    if ((proxy_server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        perror("socket creation failed");
+        exit(1);
+    }
+    if (bind(proxy_server_socket, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        exit(1);
+    }
+    if (listen(proxy_server_socket, 10) < 0) {
+        perror("listen failed\n");
+        exit(1);
+    }
+    printf("Listen on port %d\n", port);
+
+    // set of socket descriptors
+
+    if ((proxy_client_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        perror("socket creation failed");
+        exit(1);
+    }
+   
+    printf("Connect to Server.\n");
+
+    proxy_client_sock = client(wwwip, 80);
+
+    // initialize the client sockets and throughputs
+    for (int i = 0; i < MAXCLIENTS; i++) {
+        client_sockets[i] = 0;
+        throughputs[i] = 0;
+    }
+
     //listen
     while (1) {
         // clear the socket set
         FD_ZERO(&readfds);
-
         // add master socket to set
-        FD_SET(listen_socket, &readfds);
+        FD_SET(proxy_server_socket, &readfds);
         for (int i = 0; i < MAXCLIENTS; i++) {
             client_sock = client_sockets[i];
             if (client_sock != 0) {
@@ -143,11 +170,16 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
         // so wait indefinitely
         activity = select(FD_SETSIZE, &readfds, NULL, NULL, NULL);
 
-
         // If something happened on the master socket ,
         // then its an incoming connection, call accept()
-        if (FD_ISSET(listen_socket, &readfds)) {
-            int new_socket = accept(listen_socket, (struct sockaddr*)&address, (socklen_t*)&addrlen);
+        if (FD_ISSET(proxy_server_socket, &readfds)) {
+            socklen_t server_addr_len = sizeof(address);
+            int new_socket = accept(proxy_server_socket, (struct sockaddr*)&address, &addrlen);
+
+            if (new_socket < 0) {
+                perror("Accept Error");
+                exit(1);
+            }
 
             // inform user of socket number - used in send and receive commands
             printf("\n---New host connection---\n");
@@ -164,12 +196,13 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
         }
         // else it's some IO operation on a client socket
         for (int i = 0; i < MAXCLIENTS; i++) {
+            
             client_sock = client_sockets[i];
             // Note: sd == 0 is our default here by fd 0 is actually stdin
             if (client_sock != 0 && FD_ISSET(client_sock, &readfds)) {
                 // Check if it was for closing , and also read the incoming message
                 getpeername(client_sock, (struct sockaddr*)&address, (socklen_t*)&addrlen);
-                valread = read(client_sock, buffer, 1024);
+                valread = read(client_sock, buf, CONTENT);
                 if (valread == 0) {
                     // Somebody disconnected , get their details and print
                     printf("\n---Host disconnected---\n");
@@ -180,11 +213,8 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                 }
                 else {
                     // Parse http request
-
-                    proxy_client_sock = client(wwwip, port);
-
-                    int nbytes = 0;
-                    char buf[CONTENT];
+                    puts("Parse request");
+                    int nbytes = valread;
                     
                     //Revised request(both nolist f4m and video chunk)
                     char request[HEADERLEN];  memset(request, 0, HEADERLEN * sizeof(char));
@@ -203,10 +233,9 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     char chunk[1000];   memset(chunk, 0, 1000 * sizeof(char));
 
                     //receive request
-                    nbytes = (int)recv(client_sock, buf, CONTENT, MSG_NOSIGNAL);
-
+                    puts("Receive first request");
                     //delete all IF if there is something wrong here.
-                    if (nbytes < 1) { 
+                    if (nbytes < 0) { 
                         perror("Error in receving");
                         close(client_sock);
                         client_sockets[i] = 0;
@@ -216,7 +245,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 
                     //parse first line
 
-                    nbytes = readLine(buf, offset, line, sizeof(buf));
+                    nbytes = readLine(buf, offset, sizeof(buf),line);
                     offset = offset + nbytes + 1;
                     sscanf(line, "%s %s %s\r\n", method, url, version);
 
@@ -224,15 +253,15 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     while (nbytes)
                     {
                         memset(line, 0, HEADERLEN * sizeof(char));
-                        nbytes = readLine(buf, offset , line, sizeof(buf));
+                        nbytes = readLine(buf, offset ,sizeof(buf),line);
                         strcat(rest, line);
 
                         offset += nbytes + 1;
                     }
-                    nbytes = readLine(buf, offset, line, sizeof(buf));
+                    nbytes = readLine(buf, offset, sizeof(buf), line);
                     strcat(rest, line);
                     
-                    printf("Finish parse header: \nmethod: %s, url: %s, version: %s\n %s", method, url, version,rest);
+                    printf("Finish parse header: \nmethod: %s, uri: %s, version: %s\n", method, url, version);
                     
                     //IF it is a f4m request
                     if (strstr(url, ".f4m")){
@@ -271,6 +300,8 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             offset += nbytes + 1;
                         }
                         remain = content_length - (read - offset);
+                        printf("remain: %d\n", remain);
+                        printf("content_length %d\n", content_length);
                         char* bb_ptr = bb + read;
                         while (remain > 0) {
                             nbytes = (int)recv(proxy_client_sock, bb_ptr, remain, 0);
@@ -283,6 +314,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             remain -= nbytes;
                             bb_ptr += nbytes;
                         }
+                        printf("all: %s\n", buf);
                         //send back to client
                         nbytes = (int)send(client_sock, bb, remain + read, 0);
                         //send original .f4m request
@@ -303,9 +335,9 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         nbytes = (int)send(proxy_client_sock, request, sizeof(request), 0);
                     }
                     else {
-                        strcpy(request, buf);
                         //send revised request
-                        nbytes = (int)send(proxy_client_sock, request, sizeof(request), 0);
+                        nbytes = (int)send(proxy_client_sock, buf, strlen(buffer), 0);
+                        printf("%d\n", nbytes);
                     }
 
                     //Recv
@@ -318,7 +350,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     
                     if (nbytes == -1)
                     {
-                        // perror("Error receiving response");
+                        perror("Error receiving response");
                         close(proxy_client_sock);
                         break;
                     }
@@ -363,13 +395,12 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             offset += nbytes + 1;
                             // Find bitrate address
                             char* br_addr = strstr(line, "bitrate");
-                            char* brate[30];
+                            int brate;
                             if (br_addr)
                             {
-                                sscanf(br_addr, "bitrate=\"%d\"", brate);
+                                sscanf(br_addr, "bitrate=\"%d\"", &brate);
                                 // printf("Add bitrate: %d\n", br_list[br_len]);
-                                char err[30];
-                                throughputs[tp_length] = strtod(brate,err);
+                                throughputs[tp_length] = brate;
                                 tp_length++;
                             }
                         }
@@ -422,12 +453,11 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 int main(int argc, const char **argv){
     if (argc == 6 && strcmp(argv[1],"-nodns")==0) {
         unsigned short port = (unsigned short)atoi(argv[2]);
-        char* wwwip = argv[3];
-        char* errptr;
-        double alpha = strtod(argv[4], errptr);
-        char* log = argv[5];
+        const char* wwwip = argv[3];
+        double alpha = atof(argv[4]);
+        const char* log = argv[5];
 
-        run_miProxy(port, wwwip, alpha, log);
+        run_miProxy(port, (char*)wwwip, alpha, (char*)log);
 
         return 0;
 
