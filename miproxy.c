@@ -16,7 +16,6 @@
 #define MAXCLIENTS 30
 #define HEADERLEN 102400
 #define CONTENT 1000000
-
 int open_listen_socket(unsigned short port) {
     int listen_fd;
     int opt_value = 1;
@@ -102,7 +101,7 @@ int readLine(char* from, int offset, int length, char* to) {
 }
 
 int get_header_len(char* res) {
-    char resp[10000];
+    char resp[CONTENT];
     strcpy(resp, res);
     int indx;
     for (int i = 3; i < strlen(resp); i++) {
@@ -115,7 +114,7 @@ int get_header_len(char* res) {
 
 int get_content_len(char* res) {
     int len = -1;
-    char resp[10000];
+    char resp[CONTENT];
     strcpy(resp, res);
     char* tok = strtok(resp, "\r\n");
     char tmp[50] = { 0 };
@@ -368,11 +367,13 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     else {
                         //send revised request
+                        
                         nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
+
                     }
 
                     //Recv
-                    memset(buf, 0, CONTENT * sizeof(char));
+                    memset(buf, 0, CONTENT);
                     time_t start;
                     time_t end;
                     time(&start);
@@ -384,6 +385,28 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         close(proxy_client_sock);
                         break;
                     }
+
+                    int read = nbytes;
+                    int remain;
+                    int content_length = 0;
+
+                    // Parse content length
+                    offset = 0;
+                    // printf("Parse content length\n");
+                    while (strcmp(line, "\r\n"))
+                    {
+                        memset(line, 0, HEADERLEN * sizeof(char));
+                        nbytes = readLine(buf, offset, sizeof(line), line);
+
+                        char* cl_addr = strstr(line, "Content-Length: ");
+                        if (cl_addr)
+                        {
+                            sscanf(cl_addr, "Content-Length: %d", &content_length);
+                        }
+
+                        offset += nbytes + 1;
+                    }
+                    /*
                     int read = nbytes;
                     int remain;
                     int content_length = -1;
@@ -391,15 +414,16 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     // Parse content length
                     int header_length = get_header_len(buf) + 1;
                     offset = header_length;
-                    content_length = get_content_len(buf);
+                    content_length = get_content_len(buf);*/
                     remain = content_length - (strlen(buf) - offset);
                     printf("cont: %d\n", content_length);
-                    printf("header_length: %d\n", header_length);
-                    printf("buffer length: %d\n",(int)strlen(buffer));
+                    printf("header_length: %d\n", offset);
+                    printf("buffer length: %d\n",(int)strlen(buf));
                     printf("remain: %d\n", remain);
                     char* buf_ptr = buf + read;
                     int total = remain + read;
                     while (remain > 0) {
+                        printf("remain: %d\n", remain);
                         nbytes = (int)recv(proxy_client_sock, buf_ptr, remain, 0);
                         if (nbytes == -1)
                         {
@@ -461,7 +485,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     else {
                         nbytes = (int)send(client_sock, buf, strlen(buf), 0);
                         printf("Send to client: %d\n", nbytes);
-                        printf("%s\n",buf);
                         if (nbytes == -1)
                         {
                             perror("Error sending response");
