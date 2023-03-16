@@ -173,14 +173,12 @@ int forward_request_get_bitrates(char* buf, int valread, double* throughputs, in
     for (int i = 0; i < readed; i++) {
         xml[i] = buf[i];
     }
-    if (readed == -1)
-    {
+    if (readed == -1){
         perror("Error receiving response");
         close(proxy_client_sock);
         return -1;
     }
-    if (nbytes == -1)
-    {
+    if (nbytes == -1){
         perror("Error sending response");
         close(proxy_client_sock);
         return -1;
@@ -200,8 +198,7 @@ int forward_request_get_bitrates(char* buf, int valread, double* throughputs, in
         printf("Modify Throughts 2\n");
         memset(buf, 0, CONTENT);
         readed = (int)read(proxy_client_sock, buf, remain);
-        if (readed == -1)
-        {
+        if (readed == -1){
             perror("Error receiving response");
             close(proxy_client_sock);
             break;
@@ -229,6 +226,7 @@ int forward_request_get_bitrates(char* buf, int valread, double* throughputs, in
     return index;
 }
 
+
 int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     int listen_socket, addrlen, activity, valread;
     int client_sockets[MAXCLIENTS] = { 0 };
@@ -241,8 +239,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 
     double T_cur = 0.0001;
     double T_new = 0.0001;
-
-    char buffer[1025];
 
     char buf[CONTENT];
 
@@ -388,40 +384,88 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     
                     //IF it is a f4m request
                     if (strstr(url, ".f4m")){
-                        printf("f4m\n");
                         char xml[CONTENT] = { 0 }; 
                         char* newTail = "_nolist.f4m";
                         char* newUrl = strcat(strtok(url, ".f4m"), newTail);
                         sprintf(request, "%s %s %s\r\n", method, newUrl, version);
                         strcat(request, rest);
-                        printf("%s\n", request);
                         int len = forward_request_get_bitrates(buf, valread, throughputs, proxy_client_sock);
                         memset(buf, 0, CONTENT);
                         bitrate_reorder(throughputs, len);
                         T_cur = throughputs[0];
-                        printf("find\n");
                         request_send(request, valread+7, proxy_client_sock, client_sock);
-                        printf("done\n");
                     }
                     //IF it is a video request
                     else if (strstr(url, "Seg") && strstr(url, "Frag")) {
                         bitrate = get_bitrate(T_cur,throughputs,tp_length);
-
                         //pathBitrateChunk of url
+                        int old = strlen(url);
                         sscanf(url, "%[^0-9]%*d%s", path, chunk);
-                        sprintf(request, "%s %s%d%s %s", method, path, bitrate, chunk, version);
-                        printf("%s\n", request);
-                        strcat(request, rest);
+                        char ggg[1000];
+                        sprintf(ggg, "%s%d%s", path, bitrate, chunk);
+                        int ne = strlen(ggg);
+                        sprintf(request, "%s %s %s\r\n%s", method, ggg, version,rest);
                         //send revised request
 
                         clock_t start, end;
                         start = clock();
-                        int total = request_send(request, valread, proxy_client_sock, client_sock);
+
+                        int total;
+
+                        int header_len, remain, cont_len;
+                        // direct the request to the server directly
+
+                        nbytes = send(proxy_client_sock, request, valread-old+ne, 0);
+
+                        if (nbytes == -1) {
+                            perror("Error in sending chunk request to server");
+                            exit(EXIT_FAILURE);
+                        }
+                        
+                        int total_len = 0;
+                        // receive data from server
+                        memset(buf, 0, CONTENT);
+
+                        nbytes =read(proxy_client_sock, buf, CONTENT);
+                        printf("%s\n", buf);
+                        if (nbytes == -1) {
+                            perror("Error in receving chunk request to server");
+                            exit(EXIT_FAILURE);
+                        }
+                        total_len += nbytes;
+                        printf("Receive bytes: %d\n", nbytes);
+                        buf[nbytes] = '\0';
+                        send(client_sock, buf, nbytes, 0);
+
+                        // get content length
+                        cont_len = get_content_len(buf);
+                        printf("Content length: %d\n", cont_len);
+                        // get header length
+                        header_len = get_header_len(buf);
+                        printf("Response header lenght: %d\n", header_len);
+                        printf("Buffer length: %zu\n", strlen(buf));
+                        // get remain content length
+                        remain = cont_len - (nbytes - header_len);
+                        memset(buf, 0, CONTENT);
+                        printf("Response remain length: %d\n", remain);
+                        // receive from the server if there is still sth
+                        while (remain > 0) {
+                            nbytes = read(proxy_client_sock, buf, CONTENT);
+                            total_len += nbytes;
+                            printf("Receive bytes: %d\n", nbytes);
+                            buf[nbytes] = '\0';
+                            remain -= nbytes;
+                            send(client_sock, buf, nbytes, 0);
+                            memset(buf, 0, CONTENT);
+                            printf("Response remain length: %d\n", remain);
+                        }
+
+                        printf("total: %d\n", total_len);
                         end = clock();
 
                         double period = (double)(end - start)/1000;
 
-                        T_new = (total * 8) / (period*1000);
+                        T_new = (total_len * 8) / (period*1000);
                         T_cur = (1 - alpha) * T_cur + alpha * T_new;
 
                         FILE* logFile;
@@ -430,14 +474,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         fprintf(logFile, "%s %s %s %.3f %.3f %.3f %d\n", inet_ntoa(address.sin_addr), chunk, wwwip, period, T_new, T_cur, bitrate);
 
                         fclose(logFile);
-
-                        nbytes = (int)send(client_sock, buf, sizeof(buf), 0);
-                        if (nbytes == -1)
-                        {
-                            perror("Error sending response");
-                            close(proxy_client_sock);
-                            continue;
-                        }
                     }
                     else {
                         //send revised request
