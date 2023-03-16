@@ -14,8 +14,8 @@
 //#include "parse.c"
 
 #define MAXCLIENTS 30
-#define HEADERLEN 102400
-#define CONTENT 1000000
+#define HEADERLEN 10000
+#define CONTENT 10000
 int open_listen_socket(unsigned short port) {
     int listen_fd;
     int opt_value = 1;
@@ -377,16 +377,24 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     time_t start;
                     time_t end;
                     time(&start);
-                    int tt = proxy_client_sock;
-                    nbytes = (int)recv(tt, buf, sizeof(buf), MSG_NOSIGNAL);
+                    
+                    nbytes = (int)recv(proxy_client_sock, buf, sizeof(buf), MSG_NOSIGNAL);
+                    int readed = nbytes;
                     if (nbytes == -1)
                     {
                         perror("Error receiving response");
                         close(proxy_client_sock);
                         break;
                     }
+                    nbytes = (int)send(client_sock, buf, strlen(buf), 0);
+                    printf("Send to client: %d\n", nbytes);
+                    if (nbytes == -1)
+                    {
+                        perror("Error sending response");
+                        close(proxy_client_sock);
+                        continue;
+                    }
 
-                    int read = nbytes;
                     int remain;
                     int content_length = 0;
 
@@ -415,16 +423,16 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     int header_length = get_header_len(buf) + 1;
                     offset = header_length;
                     content_length = get_content_len(buf);*/
-                    remain = content_length - (strlen(buf) - offset);
+                    remain = content_length - (readed - offset);
                     printf("cont: %d\n", content_length);
                     printf("header_length: %d\n", offset);
                     printf("buffer length: %d\n",(int)strlen(buf));
                     printf("remain: %d\n", remain);
-                    char* buf_ptr = buf + strlen(buf);
-                    int total = remain + read;
+                    int total = remain + readed;
                     while (remain > 0) {
-                        printf("remain: %d\n", remain);
-                        nbytes = (int)recv(proxy_client_sock, buf_ptr, remain, 0);
+                        
+                        nbytes = (int)recv(proxy_client_sock, buf, remain, 0);
+                        send(client_sock, buf, remain, 0);
                         if (nbytes == -1)
                         {
                             perror("Error receiving response");
@@ -432,7 +440,8 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             break;
                         }
                         remain -= nbytes;
-                        buf_ptr += nbytes;
+                        memset(buf, 0, CONTENT);
+                        printf("remain: %d\n", remain);
                     }
                     // XML, get bitrate
                     if (strstr(url, ".f4m")) {
@@ -481,19 +490,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             continue;
                         }
                     }
-                    //Else, do nothing
-                    else {
-                        nbytes = (int)send(client_sock, buf, strlen(buf), 0);
-                        printf("Send to client: %d\n", nbytes);
-                        if (nbytes == -1)
-                        {
-                            perror("Error sending response");
-                            close(proxy_client_sock);
-                            continue;
-                        }
-                    }
-                    printf("Sent\n");
-                    memset(buf, 0, sizeof(buf));
                 }
             }
         }
