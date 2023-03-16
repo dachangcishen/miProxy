@@ -228,7 +228,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
         }
         // else it's some IO operation on a client socket
         for (int i = 0; i < MAXCLIENTS; i++) {
-            
+            memset(buf, 0, CONTENT);
             client_sock = client_sockets[i];
             // Note: sd == 0 is our default here by fd 0 is actually stdin
             if (client_sock != 0 && FD_ISSET(client_sock, &readfds)) {
@@ -414,25 +414,20 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 
                         offset += nbytes + 1;
                     }
-                    /*
-                    int read = nbytes;
-                    int remain;
-                    int content_length = -1;
-
-                    // Parse content length
-                    int header_length = get_header_len(buf) + 1;
-                    offset = header_length;
-                    content_length = get_content_len(buf);*/
                     remain = content_length - (readed - offset);
                     printf("cont: %d\n", content_length);
                     printf("header_length: %d\n", offset);
-                    printf("buffer length: %d\n",(int)strlen(buf));
+                    //printf("buffer length: %d\n",(int)strlen(buf));
                     printf("remain: %d\n", remain);
                     int total = remain + readed;
                     while (remain > 0) {
                         
                         nbytes = (int)recv(proxy_client_sock, buf, remain, 0);
                         send(client_sock, buf, remain, 0);
+                        if (nbytes == 0) {
+                            printf("Error\n");
+                            break;
+                        }
                         if (nbytes == -1)
                         {
                             perror("Error receiving response");
@@ -443,6 +438,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         memset(buf, 0, CONTENT);
                         printf("remain: %d\n", remain);
                     }
+                    printf("remain: %d\n", remain);
                     // XML, get bitrate
                     if (strstr(url, ".f4m")) {
                         offset = 0;
