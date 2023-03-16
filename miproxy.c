@@ -47,6 +47,7 @@ void bitrate_reorder(double* throughputs, int tp_length) {
                 throughputs[i] = temp;
             }
         }
+        
     }
 }
 
@@ -56,6 +57,9 @@ double get_bitrate(double T_cur, double* throughputs, int len)
     int i = 0;
     for (; i < len; ++i)
     {
+        printf("tcur:%f\n", T_cur);
+        printf("throughputs[i]:%f\n", throughputs[i]);
+
         if (T_cur < 1.5 * throughputs[i])
         {
             break;
@@ -390,6 +394,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         sprintf(request, "%s %s %s\r\n", method, newUrl, version);
                         strcat(request, rest);
                         int len = forward_request_get_bitrates(buf, valread, throughputs, proxy_client_sock);
+                        tp_length = len;
                         memset(buf, 0, CONTENT);
                         bitrate_reorder(throughputs, len);
                         T_cur = throughputs[0];
@@ -471,7 +476,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         FILE* logFile;
                         logFile = fopen(log, "a");
 
-                        fprintf(logFile, "%s %s %s %.3f %.3f %.3f %d\n", inet_ntoa(address.sin_addr), chunk, wwwip, period, T_new, T_cur, bitrate);
+                        fprintf(logFile, "%s %d%s %s %.3f %.3f %.3f %d\n", inet_ntoa(address.sin_addr), bitrate, chunk, wwwip, period, T_new, T_cur, bitrate);
 
                         fclose(logFile);
                     }
