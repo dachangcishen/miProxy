@@ -112,9 +112,9 @@ int readLine(char* from, int offset, int length, char* to) {
     return n;
 }
 
-int request_send(char* buf, int proxy_client_sock, int client_sock) {
+int request_send(char* buf, int valread, int proxy_client_sock, int client_sock) {
 
-    int nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
+    int nbytes = (int)send(proxy_client_sock, buf, valread, 0);
     memset(buf, 0, CONTENT);
     int readed;
     readed = read(proxy_client_sock, buf, CONTENT);
@@ -124,7 +124,7 @@ int request_send(char* buf, int proxy_client_sock, int client_sock) {
         close(proxy_client_sock);
         return -1;
     }
-    nbytes = (int)send(client_sock, buf, strlen(buf), 0);
+    nbytes = (int)send(client_sock, buf, readed, 0);
     printf("Send to client: %d\n", nbytes);
     if (nbytes == -1)
     {
@@ -148,7 +148,7 @@ int request_send(char* buf, int proxy_client_sock, int client_sock) {
     printf("remain: %d\n", remain);
     memset(buf, 0, CONTENT);
     while (remain > 0) {
-        readed = (int)read(proxy_client_sock, buf, remain);
+        readed = (int)read(proxy_client_sock, buf, CONTENT);
         
         if (readed == -1)
         {
@@ -165,9 +165,9 @@ int request_send(char* buf, int proxy_client_sock, int client_sock) {
     return total;
 }
 
-int forward_request_get_bitrates(char* buf, double* throughputs, int proxy_client_sock) {
+int forward_request_get_bitrates(char* buf, int valead , double* throughputs, int proxy_client_sock) {
     char xml[CONTENT] = { 0 };
-    int nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
+    int nbytes = (int)send(proxy_client_sock, buf, valead, 0);
     memset(buf, 0, CONTENT);
     int readed;
     readed = read(proxy_client_sock, buf, CONTENT);
@@ -326,9 +326,9 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
             if (client_sock != 0 && FD_ISSET(client_sock, &readfds)) {
                
                 // Check if it was for closing , and also read the incoming message
-                getpeername(client_sock, (struct sockaddr*)&address, (socklen_t*)&addrlen);
-                valread = (int)recv(client_sock, buf, CONTENT, MSG_NOSIGNAL);
-                printf("buffer: %s\n", buf);
+                //getpeername(client_sock, (struct sockaddr*)&address, (socklen_t*)&addrlen);
+                valread = (int)read(client_sock, buf, CONTENT);
+                printf("\nNew Valread: %d\n", valread);
                 if (valread == 0) {
                     // Somebody disconnected , get their details and print
                     printf("\n---Host disconnected---\n");
@@ -391,11 +391,11 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         sprintf(request, "%s %s %s\r\n", method, newUrl, version);
                         strcat(request, rest);
                         printf("%s\n", request);
-                        int len = forward_request_get_bitrates(buf, throughputs, proxy_client_sock);
+                        int len = forward_request_get_bitrates(buf, valread, throughputs, proxy_client_sock);
                         memset(buf, 0, CONTENT);
                         bitrate_reorder(throughputs, len);
                         T_cur = throughputs[0];
-                        request_send(request, proxy_client_sock, client_sock);
+                        request_send(request, valread, proxy_client_sock, client_sock);
                     }
                     //IF it is a video request
                     else if (strstr(url, "Seg") && strstr(url, "Frag")) {
@@ -410,7 +410,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 
                         clock_t start, end;
                         start = clock();
-                        int total = request_send(request, proxy_client_sock, client_sock);
+                        int total = request_send(request, valread, proxy_client_sock, client_sock);
                         end = clock();
 
                         double period = (double)(end - start)/1000;
@@ -435,7 +435,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     else {
                         //send revised request
-                        request_send(buf,proxy_client_sock,client_sock);
+                        request_send(buf, valread, proxy_client_sock,client_sock);
                     }
                 }
             }
