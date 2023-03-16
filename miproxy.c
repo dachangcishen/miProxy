@@ -14,8 +14,8 @@
 //#include "parse.c"
 
 #define MAXCLIENTS 30
-#define HEADERLEN 10000
-#define CONTENT 100000
+#define HEADERLEN 102400
+#define CONTENT 1000000
 
 int open_listen_socket(unsigned short port) {
     int listen_fd;
@@ -377,7 +377,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     time_t end;
                     time(&start);
                     int tt = proxy_client_sock;
-                    nbytes = (int)recv(tt, buf,sizeof(buf), MSG_NOSIGNAL);
+                    nbytes = (int)recv(tt, buf, sizeof(buf), MSG_NOSIGNAL);
                     if (nbytes == -1)
                     {
                         perror("Error receiving response");
@@ -389,15 +389,14 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     int content_length = -1;
 
                     // Parse content length
-                    int header_length = get_header_len(buf);
-                    offset = header_length +1 ;
-                    printf("%d\n", header_length);
+                    int header_length = get_header_len(buf) + 1;
+                    offset = header_length;
                     content_length = get_content_len(buf);
-                    remain = content_length - (read - offset);
+                    remain = content_length - (strlen(buf) - offset);
                     printf("cont: %d\n", content_length);
-                    printf("read: %d\n", read);
+                    printf("header_length: %d\n", header_length);
+                    printf("buffer length: %d\n",(int)strlen(buffer));
                     printf("remain: %d\n", remain);
-                    printf("offset: %d\n", offset);
                     char* buf_ptr = buf + read;
                     int total = remain + read;
                     while (remain > 0) {
@@ -460,8 +459,9 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     //Else, do nothing
                     else {
-                        nbytes = (int)send(client_sock, buf, sizeof(buf), 0);
-                        printf("Send to client: %d", nbytes);
+                        nbytes = (int)send(client_sock, buf, strlen(buf), 0);
+                        printf("Send to client: %d\n", nbytes);
+                        printf("%s\n",buf);
                         if (nbytes == -1)
                         {
                             perror("Error sending response");
