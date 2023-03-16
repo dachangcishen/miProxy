@@ -16,26 +16,6 @@
 #define MAXCLIENTS 30
 #define HEADERLEN 10000
 #define CONTENT 10000
-int open_listen_socket(unsigned short port) {
-    int listen_fd;
-    int opt_value = 1;
-    struct sockaddr_in server_address;
-
-    listen_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, (const void*)&opt_value, sizeof(int));
-
-    memset((char*)&server_address, 0, sizeof(server_address));
-
-    server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = INADDR_ANY;
-    server_address.sin_port = htons(port);
-    bind(listen_fd, (struct sockaddr*)&server_address, sizeof(server_address));
-
-    listen(listen_fd, MAXCLIENTS);
-
-    return listen_fd;
-}
 
 int client(const char* ip, int port)
 {
@@ -86,6 +66,38 @@ double get_bitrate(double T_cur, double* throughputs, int len)
     return throughputs[i];
 }
 
+int get_header_len(char* res) {
+    char resp[CONTENT];
+    strcpy(resp, res);
+    int index;
+    for (int i = 3; i < strlen(resp); i++) {
+        if (resp[i] == '\n' && resp[i - 1] == '\r' && resp[i - 2] == '\n' && resp[i - 3] == '\r') {
+            index = i;
+        }
+    }
+    return index + 1;
+}
+
+int get_content_len(char* res) {
+    int len = -1;
+    char resp[CONTENT];
+    strcpy(resp, res);
+    char* tok = strtok(resp, "\r\n");
+    char tmp[50] = { 0 };
+    while (tok)
+    {
+        if (strstr(tok, "Content-Length")) {
+            for (int i = 16; i < strlen(tok); i++) {
+                tmp[i - 16] = tok[i];
+            }
+            len = atoi(tmp);
+            break;
+        }
+        tok = strtok(NULL, "\r\n");
+    }
+    return len;
+}
+
 int readLine(char* from, int offset, int length, char* to) {
     int n;
     char* tmp = from + offset;
@@ -100,37 +112,118 @@ int readLine(char* from, int offset, int length, char* to) {
     return n;
 }
 
-int get_header_len(char* res) {
-    char resp[CONTENT];
-    strcpy(resp, res);
-    int indx;
-    for (int i = 3; i < strlen(resp); i++) {
-        if (resp[i] == '\n' && resp[i - 1] == '\r' && resp[i - 2] == '\n' && resp[i - 3] == '\r') {
-            indx = i;
-        }
-    }
-    return indx;
-}
+int request_send(char* buf, int proxy_client_sock, int client_sock) {
 
-int get_content_len(char* res) {
-    int len = -1;
-    char resp[CONTENT];
-    strcpy(resp, res);
-    char* tok = strtok(resp, "\r\n");
-    char tmp[50] = { 0 };
-    while (tok)
+    int nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
+    memset(buf, 0, CONTENT);
+    int readed;
+    readed = read(proxy_client_sock, buf, CONTENT);
+    if (readed == -1)
     {
-        if (strstr(tok, "Content-Length")) {
-            for (int i = 0; i < strlen(tok)-16; i++) {
-                tmp[i] = tok[i+16];
-            }
-            len = atoi(tmp);
+        perror("Error receiving response");
+        close(proxy_client_sock);
+        return -1;
+    }
+    nbytes = (int)send(client_sock, buf, strlen(buf), 0);
+    printf("Send to client: %d\n", nbytes);
+    if (nbytes == -1)
+    {
+        perror("Error sending response");
+        close(proxy_client_sock);
+        return -1;
+    }
+
+    // Parse content length
+    printf("Parse content length\n");
+    int remain;
+    int content_length = get_content_len(buf);
+    int header_length = get_header_len(buf);
+    int total = header_length + content_length;
+    
+    int offset = 0;
+    remain = content_length - (readed - header_length);
+    printf("cont: %d\n", content_length);
+    printf("header_length: %d\n", header_length);
+    //printf("buffer length: %d\n",(int)strlen(buf));
+    printf("remain: %d\n", remain);
+    int total = remain + readed;
+    memset(buf, 0, CONTENT);
+    while (remain > 0) {
+        readed = (int)read(proxy_client_sock, buf, remain);
+        
+        if (readed == -1)
+        {
+            perror("Error receiving response");
+            close(proxy_client_sock);
             break;
         }
-        tok = strtok(NULL, "\r\n");
+        remain -= readed;
+        printf("Readed: %d ", readed); buf[readed] = '\0';
+        send(client_sock, buf, readed, 0);
+        memset(buf, 0, CONTENT);
+        printf("remain: %d\n", remain);
     }
-    return len;
+    return total;
+}
 
+int forward_request_get_bitrates(char* buf, int* throughputs, int proxy_client_sock) {
+    char* xml[CONTENT] = { 0 };
+    int nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
+    memset(buf, 0, CONTENT);
+    int readed;
+    readed = read(proxy_client_sock, buf, CONTENT);
+    if (readed == -1)
+    {
+        perror("Error receiving response");
+        close(proxy_client_sock);
+        return -1;
+    }
+    if (nbytes == -1)
+    {
+        perror("Error sending response");
+        close(proxy_client_sock);
+        return -1;
+    }
+
+    printf("Parse content length\n");
+    int remain;
+    int content_length = get_content_len(buf);
+    int header_length = get_header_len(buf);
+    int offset = 0;
+    remain = content_length - (readed - header_length);
+    printf("cont: %d\n", content_length);
+    printf("header_length: %d\n", header_length);
+    printf("remain: %d\n", remain);
+    int total = remain + readed;
+    memset(buf, 0, CONTENT);
+    while (remain > 0) {
+        readed = (int)read(proxy_client_sock, buf, remain);
+        if (readed == -1)
+        {
+            perror("Error receiving response");
+            close(proxy_client_sock);
+            break;
+        }
+        remain -= readed;
+        printf("Readed: %d ", readed); buf[readed] = '\0';
+        strcat(xml, buf);
+        memset(buf, 0, CONTENT);
+        printf("remain: %d\n", remain);
+    }
+
+    printf("Modify Throughts");
+    int index = 0;
+    char* token = strtok(xml, " ");
+    while (token != NULL) {
+        if (strstr(token, "bitrate") != NULL) {
+            int bitr = 0;
+            sscanf(token, "bitrate=\"%d\"", &bitr);
+            throughputs[index] = bitr;
+            index++;
+        }
+        token = strtok(NULL, " ");
+    }
+    return index;
 }
 
 int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
@@ -249,8 +342,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     // Parse http request
                     puts("Parse request");
                     int nbytes = valread;
-                    printf("nbytes: %d\n", nbytes);
-
                     if (nbytes == -1) {
                         perror("Error receiving");
                         close(client_sock);
@@ -258,7 +349,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     }
                     
                     //Revised request(both nolist f4m and video chunk)
-                    char request[HEADERLEN];  memset(request, 0, HEADERLEN * sizeof(char));
+                    char request[CONTENT];  memset(request, 0, CONTENT * sizeof(char));
                     //Request Line buffer
                     char line[HEADERLEN];  memset(line, 0, HEADERLEN * sizeof(char));
                     int offset = 0;
@@ -278,7 +369,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     nbytes = readLine(buf, offset, sizeof(buf),line);
                     offset = offset + nbytes + 1;
                     sscanf(line, "%s %s %s\r\n", method, url, version);
-
                     //store rest of them
                     while (nbytes)
                     {
@@ -296,185 +386,43 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     //IF it is a f4m request
                     if (strstr(url, ".f4m")){
                         printf("f4m\n");
+                        char xml[CONTENT] = { 0 }; 
                         char* newTail = "_nolist.f4m";
                         char* newUrl = strcat(strtok(url, ".f4m"), newTail);
-                        sprintf(request, "%s %s %s", method, newUrl, version);
+                        sprintf(request, "%s %s %s\r\n", method, newUrl, version);
                         strcat(request, rest);
-
-                        //send revised request first
-                        nbytes = (int)send(proxy_client_sock, request, sizeof(request), 0);
-                        char bb[CONTENT];
-                        memset(bb, 0, CONTENT * sizeof(char));
-
-                        //get reponse forr nolist.f4m
-                        nbytes = (int)recv(proxy_client_sock, bb, HEADERLEN * sizeof(char), 0);
-                        if (nbytes == -1)
-                        {
-                            // perror("Error receiving response");
-                            close(proxy_client_sock);
-                            break;
-                        }
-                        int read = nbytes;
-                        int remain;
-                        int content_length = 0;
-
-                        // Parse content length
-                        offset = 0;
-                        // printf("Parse content length\n");
-                        while (strcmp(line, "\r\n"))
-                        {
-                            memset(line, 0, HEADERLEN * sizeof(char));
-                            nbytes = readLine(bb, offset,sizeof(line), line);
-                            char* cl = strstr(line, "Content-Length: ");
-                            if (cl)
-                                sscanf(cl, "Content-Length: %d", &content_length);
-                            offset += nbytes + 1;
-                        }
-                        remain = content_length - (read - offset);
-                        printf("remain: %d\n", remain);
-                        printf("content_length %d\n", content_length);
-                        char* bb_ptr = bb + read;
-                        while (remain > 0) {
-                            nbytes = (int)recv(proxy_client_sock, bb_ptr, remain, 0);
-                            if (nbytes == -1)
-                            {
-                                perror("Error receiving response");
-                                close(proxy_client_sock);
-                                break;
-                            }
-                            remain -= nbytes;
-                            bb_ptr += nbytes;
-                        }
-                        printf("all: %s\n", buf);
-                        //send back to client
-                        nbytes = (int)send(client_sock, bb, remain + read, 0);
-                        //send original .f4m request
-                        nbytes = (int)send(proxy_client_sock, buf, sizeof(buffer), 0);
-
+                        printf("%d\n", request);
+                        int len = forward_request_get_bitrates(buf, throughputs, proxy_client_sock);
+                        memset(buf, 0, CONTENT);
+                        bitrate_reorder(throughputs, len);
+                        T_cur = throughputs[0];
+                        request_send(request, proxy_client_sock, client_sock);
                     }
                     //IF it is a video request
                     else if (strstr(url, "Seg") && strstr(url, "Frag")) {
-
-                        //get a bitrate, not done yet
                         bitrate = get_bitrate(T_cur,throughputs,tp_length);
 
                         //pathBitrateChunk of url
                         sscanf(url, "%[^0-9]%*d%s", path, chunk);
                         sprintf(request, "%s %s%d%s %s", method, path, bitrate, chunk, version);
+                        printf("%s\n", request);
                         strcat(request, rest);
                         //send revised request
-                        nbytes = (int)send(proxy_client_sock, request, sizeof(request), 0);
-                    }
-                    else {
-                        //send revised request
-                        
-                        nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
 
-                    }
+                        clock_t start, end;
+                        start = clock();
+                        int total = request_send(request, proxy_client_sock, client_sock);
+                        end = clock();
 
-                    //Recv
-                    memset(buf, 0, CONTENT);
-                    time_t start;
-                    time_t end;
-                    time(&start);
-                    
-                    nbytes = (int)recv(proxy_client_sock, buf, sizeof(buf), MSG_NOSIGNAL);
-                    int readed = nbytes;
-                    if (nbytes == -1)
-                    {
-                        perror("Error receiving response");
-                        close(proxy_client_sock);
-                        break;
-                    }
-                    nbytes = (int)send(client_sock, buf, strlen(buf), 0);
-                    printf("Send to client: %d\n", nbytes);
-                    if (nbytes == -1)
-                    {
-                        perror("Error sending response");
-                        close(proxy_client_sock);
-                        continue;
-                    }
+                        double period = (double)(end - start)/1000;
 
-                    int remain;
-                    int content_length = 0;
-
-                    // Parse content length
-                    offset = 0;
-                    // printf("Parse content length\n");
-                    while (strcmp(line, "\r\n"))
-                    {
-                        memset(line, 0, HEADERLEN * sizeof(char));
-                        nbytes = readLine(buf, offset, sizeof(line), line);
-
-                        char* cl_addr = strstr(line, "Content-Length: ");
-                        if (cl_addr)
-                        {
-                            sscanf(cl_addr, "Content-Length: %d", &content_length);
-                        }
-
-                        offset += nbytes + 1;
-                    }
-                    remain = content_length - (readed - offset);
-                    printf("cont: %d\n", content_length);
-                    printf("header_length: %d\n", offset);
-                    //printf("buffer length: %d\n",(int)strlen(buf));
-                    printf("remain: %d\n", remain);
-                    int total = remain + readed;
-                    while (remain > 0) {
-                        
-                        nbytes = (int)recv(proxy_client_sock, buf, remain, 0);
-                        send(client_sock, buf, remain, 0);
-                        if (nbytes == 0) {
-                            printf("Error\n");
-                            break;
-                        }
-                        if (nbytes == -1)
-                        {
-                            perror("Error receiving response");
-                            close(proxy_client_sock);
-                            break;
-                        }
-                        remain -= nbytes;
-                        memset(buf, 0, CONTENT);
-                        printf("remain: %d\n", remain);
-                    }
-                    printf("remain: %d\n", remain);
-                    // XML, get bitrate
-                    if (strstr(url, ".f4m")) {
-                        offset = 0;
-                        while (!strstr(line, "</manifest>"))
-                        {
-                            memset(line, 0, HEADERLEN * sizeof(char));
-                            nbytes = readLine(buf, offset, sizeof(line), line);
-
-                            offset += nbytes + 1;
-                            // Find bitrate address
-                            char* br_addr = strstr(line, "bitrate");
-                            int brate;
-                            if (br_addr)
-                            {
-                                sscanf(br_addr, "bitrate=\"%d\"", &brate);
-                                // printf("Add bitrate: %d\n", br_list[br_len]);
-                                throughputs[tp_length] = brate;
-                                tp_length++;
-                            }
-                        }
-                        bitrate_reorder(throughputs, tp_length);
-
-                        T_cur = throughputs[0];
-                    }
-                    // Video Chunk
-                    else if (strstr(url, "Seg") && strstr(url, "Frag")) {
-                        time(&end);
-                        double period = (double)end - start;
-
-                        T_new = (total * 8) / period;
+                        T_new = (total * 8) / (period*1000);
                         T_cur = (1 - alpha) * T_cur + alpha * T_new;
 
                         FILE* logFile;
-                        logFile = fopen(log, "w");
+                        logFile = fopen(log, "a");
 
-                        fprintf(logFile, "%s %s %s %.3f %.3f %.3f %d\n", inet_ntoa(address.sin_addr),chunk, wwwip, period, T_new, T_cur, bitrate);
+                        fprintf(logFile, "%s %s %s %.3f %.3f %.3f %d\n", inet_ntoa(address.sin_addr), chunk, wwwip, period, T_new, T_cur, bitrate);
 
                         fclose(logFile);
 
@@ -485,6 +433,10 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                             close(proxy_client_sock);
                             continue;
                         }
+                    }
+                    else {
+                        //send revised request
+                        request_send(buf,proxy_client_sock,client_sock);
                     }
                 }
             }
