@@ -146,7 +146,6 @@ int request_send(char* buf, int proxy_client_sock, int client_sock) {
     printf("header_length: %d\n", header_length);
     //printf("buffer length: %d\n",(int)strlen(buf));
     printf("remain: %d\n", remain);
-    int total = remain + readed;
     memset(buf, 0, CONTENT);
     while (remain > 0) {
         readed = (int)read(proxy_client_sock, buf, remain);
@@ -166,8 +165,8 @@ int request_send(char* buf, int proxy_client_sock, int client_sock) {
     return total;
 }
 
-int forward_request_get_bitrates(char* buf, int* throughputs, int proxy_client_sock) {
-    char* xml[CONTENT] = { 0 };
+int forward_request_get_bitrates(char* buf, double* throughputs, int proxy_client_sock) {
+    char xml[CONTENT] = { 0 };
     int nbytes = (int)send(proxy_client_sock, buf, strlen(buf), 0);
     memset(buf, 0, CONTENT);
     int readed;
@@ -391,7 +390,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         char* newUrl = strcat(strtok(url, ".f4m"), newTail);
                         sprintf(request, "%s %s %s\r\n", method, newUrl, version);
                         strcat(request, rest);
-                        printf("%d\n", request);
+                        printf("%s\n", request);
                         int len = forward_request_get_bitrates(buf, throughputs, proxy_client_sock);
                         memset(buf, 0, CONTENT);
                         bitrate_reorder(throughputs, len);
