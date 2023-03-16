@@ -113,7 +113,6 @@ int readLine(char* from, int offset, int length, char* to) {
 }
 
 int request_send(char* buf, int valread, int proxy_client_sock, int client_sock) {
-
     int nbytes = (int)send(proxy_client_sock, buf, valread, 0);
     memset(buf, 0, CONTENT);
     int readed;
@@ -165,12 +164,15 @@ int request_send(char* buf, int valread, int proxy_client_sock, int client_sock)
     return total;
 }
 
-int forward_request_get_bitrates(char* buf, int valead , double* throughputs, int proxy_client_sock) {
-    char xml[CONTENT] = { 0 };
-    int nbytes = (int)send(proxy_client_sock, buf, valead, 0);
+int forward_request_get_bitrates(char* buf, int valread, double* throughputs, int proxy_client_sock) {
+    char xml[CONTENT*10] = { 0 };
+    int nbytes = (int)send(proxy_client_sock, buf, valread, 0);
     memset(buf, 0, CONTENT);
     int readed;
     readed = read(proxy_client_sock, buf, CONTENT);
+    for (int i = 0; i < readed; i++) {
+        xml[i] = buf[i];
+    }
     if (readed == -1)
     {
         perror("Error receiving response");
@@ -194,8 +196,9 @@ int forward_request_get_bitrates(char* buf, int valead , double* throughputs, in
     printf("header_length: %d\n", header_length);
     printf("remain: %d\n", remain);
     int total = remain + readed;
-    memset(buf, 0, CONTENT);
     while (remain > 0) {
+        printf("Modify Throughts 2\n");
+        memset(buf, 0, CONTENT);
         readed = (int)read(proxy_client_sock, buf, remain);
         if (readed == -1)
         {
@@ -209,14 +212,15 @@ int forward_request_get_bitrates(char* buf, int valead , double* throughputs, in
         memset(buf, 0, CONTENT);
         printf("remain: %d\n", remain);
     }
-
-    printf("Modify Throughts");
     int index = 0;
     char* token = strtok(xml, " ");
     while (token != NULL) {
-        if (strstr(token, "bitrate") != NULL) {
-            int bitr = 0;
-            sscanf(token, "bitrate=\"%d\"", &bitr);
+        if (strstr(token, "bitrate")) {
+            char tmp[12] = { 0 };
+            for (int i = 9; i < strlen(token) - 1; i++) {
+                tmp[i - 9] = token[i];
+            }
+            int bitr = atoi(tmp);
             throughputs[index] = bitr;
             index++;
         }
@@ -395,7 +399,9 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         memset(buf, 0, CONTENT);
                         bitrate_reorder(throughputs, len);
                         T_cur = throughputs[0];
-                        request_send(request, valread, proxy_client_sock, client_sock);
+                        printf("find\n");
+                        request_send(request, valread+7, proxy_client_sock, client_sock);
+                        printf("done\n");
                     }
                     //IF it is a video request
                     else if (strstr(url, "Seg") && strstr(url, "Frag")) {
