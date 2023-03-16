@@ -420,7 +420,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                     printf("header_length: %d\n", offset);
                     printf("buffer length: %d\n",(int)strlen(buf));
                     printf("remain: %d\n", remain);
-                    char* buf_ptr = buf + read;
+                    char* buf_ptr = buf + strlen(buf);
                     int total = remain + read;
                     while (remain > 0) {
                         printf("remain: %d\n", remain);
