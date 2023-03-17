@@ -489,7 +489,6 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                 }
             }
         }
-        //not finished yet
     }
     return 0;
 }
