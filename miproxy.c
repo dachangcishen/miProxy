@@ -393,10 +393,9 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         char* newUrl = strcat(strtok(url, ".f4m"), newTail);
                         sprintf(request, "%s %s %s\r\n", method, newUrl, version);
                         strcat(request, rest);
-                        int len = forward_request_get_bitrates(buf, valread, throughputs, proxy_client_sock);
-                        tp_length = len;
+                        tp_length = forward_request_get_bitrates(buf, valread, throughputs, proxy_client_sock);
                         memset(buf, 0, CONTENT);
-                        bitrate_reorder(throughputs, len);
+                        bitrate_reorder(throughputs, tp_length);
                         T_cur = throughputs[0];
                         request_send(request, valread+7, proxy_client_sock, client_sock);
                     }
@@ -494,7 +493,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
 
 
 int main(int argc, const char **argv){
-    if (argc == 6 && strcmp(argv[1],"-nodns")==0) {
+    if (argc == 6) {
         unsigned short port = (unsigned short)atoi(argv[2]);
         const char* wwwip = argv[3];
         double alpha = atof(argv[4]);
