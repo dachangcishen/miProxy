@@ -41,7 +41,7 @@ int client(const char* ip, int port)
     return sockfd;
 }
 
-void bitrate_reorder(double* throughputs, int tp_length) {
+void bitrate_reorder(int* throughputs, int tp_length) {
     int i, j;
     for (i = 0; i < tp_length; i++) {
         for (j = i + 1; j < tp_length; j++) {
@@ -56,13 +56,13 @@ void bitrate_reorder(double* throughputs, int tp_length) {
 }
 
 //choose a proper bitrate
-double get_bitrate(double T_cur, double* throughputs, int len)
+double get_bitrate(double T_cur, int* throughputs, int len)
 {
     int i = 0;
     for (; i < len; ++i)
     {
         printf("tcur:%f\n", T_cur);
-        printf("throughputs[i]:%f\n", throughputs[i]);
+        printf("throughputs[i]:%d\n", throughputs[i]);
 
         if (T_cur < 1.5 * throughputs[i])
         {
@@ -172,7 +172,7 @@ int request_send(char* buf, int valread, int proxy_client_sock, int client_sock)
     return total;
 }
 
-int forward_request_get_bitrates(char* buf, int valread, double* throughputs, int proxy_client_sock) {
+int forward_request_get_bitrates(char* buf, int valread, int* throughputs, int proxy_client_sock) {
     char xml[CONTENT * 10] = { 0 };
     int nbytes = (int)send(proxy_client_sock, buf, valread, 0);
     memset(buf, 0, CONTENT);
@@ -238,15 +238,16 @@ int forward_request_get_bitrates(char* buf, int valread, double* throughputs, in
 int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
     int listen_socket, addrlen, activity, valread;
     int client_sockets[MAXCLIENTS] = { 0 };
-    double throughputs[MAXCLIENTS] = { 0 };
+    int throughputs[MAXCLIENTS] = { 0 };
     int tp_length = 0;
     int bitrate;
     int proxy_server_socket, client_sock, proxy_client_sock;
     struct sockaddr_in server_addr, client_addr;
     fd_set readfds;
 
-    double T_cur = 0.0001;
-    double T_new = 0.0001;
+    double T_cur[MAXCLIENTS] = { 0.0001 };
+    double T_new[MAXCLIENTS] = { 0.0001 };
+    char browser_ip[MAXCLIENTS][50];
 
     char buf[CONTENT];
 
@@ -322,6 +323,7 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                 // if position is empty
                 if (client_sockets[i] == 0) {
                     client_sockets[i] = new_socket;
+                    strcpy(browser_ip[i], inet_ntoa(address.sin_addr));
                     break;
                 }
             }
@@ -399,12 +401,12 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         tp_length = forward_request_get_bitrates(buf, valread, throughputs, proxy_client_sock);
                         memset(buf, 0, CONTENT);
                         bitrate_reorder(throughputs, tp_length);
-                        T_cur = throughputs[0];
+                        T_cur[i] = throughputs[0];
                         request_send(request, valread + 7, proxy_client_sock, client_sock);
                     }
                     //IF it is a video request
                     else if (strstr(url, "Seg") && strstr(url, "Frag")) {
-                        bitrate = get_bitrate(T_cur, throughputs, tp_length);
+                        bitrate = get_bitrate(T_cur[i], throughputs, tp_length);
                         //pathBitrateChunk of url
                         int old = strlen(url);
                         sscanf(url, "%[^0-9]%*d%s", path, chunk);
@@ -472,13 +474,13 @@ int run_miProxy(unsigned short port, char* wwwip, double alpha, char* log) {
                         double period = double(duration.count()) * chrono::microseconds::period::num / chrono::microseconds::period::den ;
                         
 
-                        T_new = (total_len * 8) / (period * 1000);
-                        T_cur = (1 - alpha) * T_cur + alpha * T_new;
+                        T_new[i] = (total_len * 8) / (period * 1000);
+                        T_cur[i] = (1 - alpha) * T_cur[i] + alpha * T_new[i];
 
                         FILE* logFile;
                         logFile = fopen(log, "a");
 
-                        fprintf(logFile, "%s %d%s %s %.3f %.3f %.3f %d\n", inet_ntoa(address.sin_addr), bitrate, chunk, wwwip, period, T_new, T_cur, bitrate);
+                        fprintf(logFile, "%s %d%s %s %.3f %.3f %.3f %d\n", browser_ip[i], bitrate, chunk, wwwip, period, T_new[i], T_cur[i], bitrate);
 
                         fclose(logFile);
                     }
